@@ -8,7 +8,7 @@ fi
 
 FILE_NAME=$1
 M3U8_URL=$2
-VENV_DIR=".venv"
+PYTHON_BIN="/opt/homebrew/Caskroom/miniconda/base/envs/subbot/bin/python"
 
 echo "=================================================="
 echo "🚀 1단계: m3u8 스트리밍 영상 다운로드 중..."
@@ -21,36 +21,33 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "\n=================================================="
-echo "🚀 2단계: Python 가상환경 진입 및 Whisper 영어 자막 생성 중..."
+echo "🚀 2단계: Qwen3-ASR 영어 자막 생성 및 정렬 중..."
 echo "=================================================="
-if [ -d "$VENV_DIR" ]; then
-    source "${VENV_DIR}/bin/activate"
-else
-    echo "⚠️ 가상환경이 없습니다. 새로 생성합니다."
-    python3 -m venv "$VENV_DIR"
-    source "${VENV_DIR}/bin/activate"
-    pip install git+https://github.com/openai/whisper.git openai
+if [ ! -f "$PYTHON_BIN" ]; then
+    echo "❌ 에러: conda 환경 'subbot'을 찾을 수 없습니다."
+    exit 1
 fi
 
-# MPS 오버플로우 에러 방지를 위해 CPU 모드 사용
-whisper "${FILE_NAME}.mp4" --model base --output_format srt --language en --device cpu
+$PYTHON_BIN qwen3_asr_align.py "${FILE_NAME}.mp4" --output "${FILE_NAME}_en.srt" --language English --device auto
 
-if [ -f "${FILE_NAME}.srt" ]; then
-    mv "${FILE_NAME}.srt" "${FILE_NAME}_en.srt"
-else
-    echo "❌ Whisper 자막 생성 실패."
+if [ ! -f "${FILE_NAME}_en.srt" ]; then
+    echo "❌ Qwen3-ASR 자막 생성 실패."
     exit 1
 fi
 
 echo "\n=================================================="
-echo "🚀 3단계: LLM(translate_srt.py) 호출하여 한글 번역 자막 생성 중..."
+echo "🚀 3단계: LLM(translator.py) 호출하여 한글 번역 자막 생성 중..."
 echo "=================================================="
-if [ -z "$OPENAI_API_KEY" ]; then
-    echo "❌ 에러: OPENAI_API_KEY 환경변수가 정의되지 않았습니다."
+if [ -z "$OPENROUTER_API_KEY" ]; then
+    echo "❌ 에러: OPENROUTER_API_KEY 환경변수가 정의되지 않았습니다."
+    exit 1
+fi
+if [ -z "$OPENROUTER_MODELS" ]; then
+    echo "❌ 에러: OPENROUTER_MODELS 환경변수가 정의되지 않았습니다."
     exit 1
 fi
 
-python3 translator.py "$FILE_NAME"
+$PYTHON_BIN translator.py "$FILE_NAME"
 
 if [ ! -f "${FILE_NAME}_kr.srt" ]; then
     echo "❌ 번역 실패: ${FILE_NAME}_kr.srt 파일이 생성되지 않았습니다."
@@ -58,12 +55,12 @@ if [ ! -f "${FILE_NAME}_kr.srt" ]; then
 fi
 
 echo "\n=================================================="
-echo "🚀 4단계: ffmpeg를 사용하여 한국어 자막 하드번 인코딩 중..."
+echo "🚀 4단계: ffmpeg를 사용하여 영어 및 한국어 소프트 자막 트랙 추가 중..."
 echo "=================================================="
-ffmpeg -i "${FILE_NAME}.mp4" -vf "subtitles=${FILE_NAME}_kr.srt" -c:a copy "${FILE_NAME}_final.mp4" -y
+ffmpeg -i "${FILE_NAME}.mp4" -i "${FILE_NAME}_en.srt" -i "${FILE_NAME}_kr.srt" -c copy -c:s mov_text -map 0 -map 1:s -map 2:s -metadata:s:s:0 language=eng -metadata:s:s:0 handler_name="English" -metadata:s:s:1 language=kor -metadata:s:s:1 handler_name="Korean" "${FILE_NAME}_final.mp4" -y
 
 if [ $? -ne 0 ]; then
-    echo "❌ 자막 하드번 합성 실패."
+    echo "❌ 소프트 자막 합성 실패."
     exit 1
 fi
 
