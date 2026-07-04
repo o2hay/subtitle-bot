@@ -57,7 +57,12 @@ fi
 echo "\n=================================================="
 echo "🚀 4단계: ffmpeg를 사용하여 영어 및 한국어 소프트 자막 트랙 추가 중..."
 echo "=================================================="
-ffmpeg -i "${FILE_NAME}.mp4" -i "${FILE_NAME}_en.srt" -i "${FILE_NAME}_kr.srt" -c copy -c:s mov_text -map 0 -map 1:s -map 2:s -metadata:s:s:0 language=eng -metadata:s:s:0 handler_name="English" -metadata:s:s:1 language=kor -metadata:s:s:1 handler_name="Korean" "${FILE_NAME}_final.mp4" -y
+ffmpeg -i "${FILE_NAME}.mp4" -i "${FILE_NAME}_en.srt" -i "${FILE_NAME}_kr.srt" \
+  -map 0:v -map 0:a? -map 1:s -map 2:s \
+  -c copy -c:s mov_text \
+  -metadata:s:s:0 language=eng -metadata:s:s:0 handler_name="English" \
+  -metadata:s:s:1 language=kor -metadata:s:s:1 handler_name="Korean" \
+  "${FILE_NAME}_final.mp4" -y
 
 if [ $? -ne 0 ]; then
     echo "❌ 소프트 자막 합성 실패."
