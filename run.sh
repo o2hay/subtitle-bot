@@ -1,19 +1,42 @@
 #!/bin/zsh
 
-if [ $# -lt 2 ]; then
-    echo "❌ 사용법: $0 [출력파일명_확장자제외] \"[m3u8_URL]\""
+BURN_IN=false
+POSITIONAL_ARGS=()
+
+for arg in "$@"; do
+    if [ "$arg" = "-b" ]; then
+        BURN_IN=true
+    else
+        POSITIONAL_ARGS+=("$arg")
+    fi
+done
+
+if [ ${#POSITIONAL_ARGS[@]} -lt 2 ]; then
+    echo "❌ 사용법: $0 [-b] [출력파일명_확장자제외] \"[영상_URL]\""
     echo "💡 예시: $0 lecture_02 \"https://example.com/master.m3u8\""
+    echo "💡 예시: $0 -b lecture_02 \"https://www.youtube.com/watch?v=...\""
     exit 1
 fi
 
-FILE_NAME=$1
-M3U8_URL=$2
+FILE_NAME="${POSITIONAL_ARGS[1]}"
+INPUT_URL="${POSITIONAL_ARGS[2]}"
 PYTHON_BIN="/opt/homebrew/Caskroom/miniconda/base/envs/subbot/bin/python"
+YT_DLP_BIN="/opt/homebrew/Caskroom/miniconda/base/envs/subbot/bin/yt-dlp"
 
-echo "=================================================="
-echo "🚀 1단계: m3u8 스트리밍 영상 다운로드 중..."
-echo "=================================================="
-ffmpeg -i "$M3U8_URL" -c copy "${FILE_NAME}.mp4"
+if [[ "$INPUT_URL" == *youtube.com* || "$INPUT_URL" == *youtu.be* ]]; then
+    echo "=================================================="
+    echo "🚀 1단계: 유튜브 영상 다운로드 중 (yt-dlp)..."
+    echo "=================================================="
+    "$YT_DLP_BIN" -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" \
+      --merge-output-format mp4 \
+      -o "${FILE_NAME}.mp4" \
+      "$INPUT_URL"
+else
+    echo "=================================================="
+    echo "🚀 1단계: m3u8 스트리밍 영상 다운로드 중 (ffmpeg)..."
+    echo "=================================================="
+    ffmpeg -i "$INPUT_URL" -c copy "${FILE_NAME}.mp4"
+fi
 
 if [ $? -ne 0 ]; then
     echo "❌ 다운로드 실패. URL 혹은 네트워크를 확인하세요."
@@ -54,18 +77,30 @@ if [ ! -f "${FILE_NAME}_kr.srt" ]; then
     exit 1
 fi
 
-echo "\n=================================================="
-echo "🚀 4단계: ffmpeg를 사용하여 영어 및 한국어 소프트 자막 트랙 추가 중..."
-echo "=================================================="
-ffmpeg -i "${FILE_NAME}.mp4" -i "${FILE_NAME}_en.srt" -i "${FILE_NAME}_kr.srt" \
-  -map 0:v -map "0:a?" -map 1:s -map 2:s \
-  -c copy -c:s mov_text \
-  -metadata:s:s:0 language=eng -metadata:s:s:0 handler_name="English" \
-  -metadata:s:s:1 language=kor -metadata:s:s:1 handler_name="Korean" \
-  "${FILE_NAME}_final.mp4" -y
+if [ "$BURN_IN" = true ]; then
+    echo "\n=================================================="
+    echo "🚀 4단계: ffmpeg를 사용하여 한국어 자막 오버레이(하드번) 및 영어 소프트 자막 추가 중..."
+    echo "=================================================="
+    ffmpeg -i "${FILE_NAME}.mp4" -i "${FILE_NAME}_en.srt" \
+      -vf "subtitles='${FILE_NAME}_kr.srt':force_style='FontSize=16,Outline=1.5'" \
+      -map 0:v -map "0:a?" -map 1:s \
+      -c:v libx264 -c:a copy -c:s mov_text \
+      -metadata:s:s:0 language=eng -metadata:s:s:0 handler_name="English" \
+      "${FILE_NAME}_final.mp4" -y
+else
+    echo "\n=================================================="
+    echo "🚀 4단계: ffmpeg를 사용하여 영어 및 한국어 소프트 자막 트랙 추가 중..."
+    echo "=================================================="
+    ffmpeg -i "${FILE_NAME}.mp4" -i "${FILE_NAME}_en.srt" -i "${FILE_NAME}_kr.srt" \
+      -map 0:v -map "0:a?" -map 1:s -map 2:s \
+      -c copy -c:s mov_text \
+      -metadata:s:s:0 language=eng -metadata:s:s:0 handler_name="English" \
+      -metadata:s:s:1 language=kor -metadata:s:s:1 handler_name="Korean" \
+      "${FILE_NAME}_final.mp4" -y
+fi
 
 if [ $? -ne 0 ]; then
-    echo "❌ 소프트 자막 합성 실패."
+    echo "❌ 자막 합성 실패."
     exit 1
 fi
 
